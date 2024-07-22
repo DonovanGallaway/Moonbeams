@@ -58,18 +58,20 @@ public class PlayerController : MonoBehaviour {
         UpdatePlayerFire();
         CheckGrounded();
         if (Input.GetButtonDown("Jump") && isGrounded) {
-            Debug.Log("Walahi I am Here");
             Jump();
+        }
+        if (isClimbing) {
+            Climb();
         }
     }
 
-private void CheckGrounded() {
-    if(isInMoonlight){
-        isGrounded = Physics.Raycast(transform.position, Vector3.down, 1.3f);
-    } else {
-        isGrounded = Physics.Raycast(transform.position, Vector3.down, 1.1f);
+    private void CheckGrounded() {
+        if(isInMoonlight){
+            isGrounded = Physics.Raycast(transform.position, Vector3.down, 1.5f);
+        } else {
+            isGrounded = Physics.Raycast(transform.position, Vector3.down, 1.1f);
+        }
     }
-}
 
     private void Jump() {
         rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
@@ -77,42 +79,31 @@ private void CheckGrounded() {
     }
 
     private void MovePlayer() {
-        if (isClimbing) {
-            Climb();
+        // Get input
+        float moveHorizontal = Input.GetAxis("Horizontal");
+        float moveVertical = Input.GetAxis("Vertical");
+        // Calculate movement direction relative to the camera
+        Vector3 forward = mainCamera.transform.forward;
+        Vector3 right = mainCamera.transform.right;
+        forward.y = 0f; // Ignore vertical component
+        right.y = 0f; // Ignore vertical component
+        forward.Normalize();
+        right.Normalize();
+        Vector3 moveDirection = (forward * moveVertical + right * moveHorizontal).normalized;
+        // Calculate the target position
+        Vector3 targetPosition = rb.position + moveDirection * moveSpeed * Time.fixedDeltaTime;
+        // Smoothly interpolate towards the target position
+        Vector3 smoothedPosition = Vector3.Lerp(rb.position, targetPosition, smoothSpeed);
+        // Apply movement to the player
+        rb.MovePosition(smoothedPosition);
+        // Rotate player to face the movement direction
+        if (moveDirection != Vector3.zero) {
+            // Rotate player to face the movement direction with an offset if needed
+            Quaternion targetRotation = Quaternion.LookRotation(moveDirection);
+            rb.rotation = Quaternion.Slerp(rb.rotation, targetRotation, turnSpeed * Time.fixedDeltaTime);
         }
-        else {
-            // Get input
-            float moveHorizontal = Input.GetAxis("Horizontal");
-            float moveVertical = Input.GetAxis("Vertical");
 
-            // Calculate movement direction relative to the camera
-            Vector3 forward = mainCamera.transform.forward;
-            Vector3 right = mainCamera.transform.right;
-            forward.y = 0f; // Ignore vertical component
-            right.y = 0f; // Ignore vertical component
-            forward.Normalize();
-            right.Normalize();
-
-            Vector3 moveDirection = (forward * moveVertical + right * moveHorizontal).normalized;
-
-            // Calculate the target position
-            Vector3 targetPosition = rb.position + moveDirection * moveSpeed * Time.fixedDeltaTime;
-
-            // Smoothly interpolate towards the target position
-            Vector3 smoothedPosition = Vector3.Lerp(rb.position, targetPosition, smoothSpeed);
-
-            // Apply movement to the player
-            rb.MovePosition(smoothedPosition);
-
-            // Rotate player to face the movement direction
-            if (moveDirection != Vector3.zero) {
-                // Rotate player to face the movement direction with an offset if needed
-                Quaternion targetRotation = Quaternion.LookRotation(moveDirection);
-                rb.rotation = Quaternion.Slerp(rb.rotation, targetRotation, turnSpeed * Time.fixedDeltaTime);
-            }
-
-            CheckForClimbableSurface();
-        }
+        CheckForClimbableSurface();
     }
 
     private void CheckForClimbableSurface() {
@@ -123,9 +114,13 @@ private void CheckGrounded() {
             if (hit.collider.CompareTag("Climbable")) {
                 isClimbing = true;
                 climbNormal = hit.normal;
-                rb.useGravity = false;
-                rb.velocity = Vector3.zero;
+                rb.useGravity = false; // Ensure gravity is disabled while climbing
+                rb.velocity = Vector3.zero; // Reset velocity to prevent falling
             }
+        } else {
+            // This else block ensures that climbing stops when there's no climbable surface in front
+            isClimbing = false;
+            rb.useGravity = true; // Re-enable gravity when not climbing
         }
     }
 
@@ -133,30 +128,20 @@ private void CheckGrounded() {
         float moveHorizontal = Input.GetAxis("Horizontal");
         float moveVertical = Input.GetAxis("Vertical");
 
-        // Get the climb direction vectors relative to the camera
-        Vector3 cameraForward = mainCamera.transform.forward;
-        Vector3 cameraRight = mainCamera.transform.right;
-        cameraForward.y = 0; // Ignore vertical component for forward direction
-        cameraRight.y = 0; // Ignore vertical component for right direction
-        cameraForward.Normalize();
-        cameraRight.Normalize();
-
-        // Get the direction vectors for climbing based on the surface normal
         Vector3 climbRight = Vector3.Cross(Vector3.up, climbNormal).normalized;
         Vector3 climbUp = Vector3.Cross(climbNormal, climbRight).normalized;
 
-        // Combine the camera and climb vectors to determine movement
-        Vector3 climbMovement = (cameraRight * moveHorizontal + cameraForward * moveVertical) * climbSpeed * Time.fixedDeltaTime;
+        Vector3 climbMovement = (climbRight * moveHorizontal + climbUp * moveVertical) * climbSpeed * Time.fixedDeltaTime;
 
         // Apply the climb movement
         rb.MovePosition(transform.position + climbMovement);
 
-        // If no input, stop climbing
+        // Stop climbing if there's no input or the player reaches a non-climbable area
         if (moveHorizontal == 0 && moveVertical == 0) {
             isClimbing = false;
-            rb.useGravity = true;
+            rb.useGravity = true; // Re-enable gravity when not actively climbing
         }
-    }
+    }  
 
     private void CheckIfInShadow() {
         rb.mass = 1f;
@@ -192,6 +177,14 @@ private void CheckGrounded() {
             }
         }
 
+        GameObject[] glassObjects = GameObject.FindGameObjectsWithTag("Glass");
+        foreach (GameObject glassObject in glassObjects) {
+            Collider glassCollider = glassObject.GetComponent<Collider>();
+            if (glassCollider != null) {
+                glassCollider.enabled = !isInMoonlight;
+            }
+        }
+
         if(!isInMoonlight) {
             Vector3 gravityForce = Vector3.down * 9.81f;
             rb.AddForce(gravityForce, ForceMode.Force);
@@ -203,20 +196,6 @@ private void CheckGrounded() {
                 rb.AddForce(Vector3.up * 0.2f, ForceMode.Impulse);
             }
         }
-
-        // if (isInMoonlight) {
-        //     Debug.Log("Player is in moonlight");
-        // }
-        // else {
-        //     Debug.Log("Player is not in moonlight");
-        // }
-
-        // if (isInArtificialLight) {
-        //     Debug.Log("Player is in artificial light");
-        // }
-        // else {
-        //     Debug.Log("Player is not in artificial light");
-        // }
     }
 
     private void UpdatePlayerColor() {
